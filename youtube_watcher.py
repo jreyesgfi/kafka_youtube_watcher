@@ -5,6 +5,10 @@ import requests
 import json
 from pprint import pformat
 from config import config
+from confluent_kafka import SerializingProducer
+from confluent_kafka.serialization import StringSerializer
+from confluent_kafka.schema_registry.avro import AvroSerializer
+from confluent_kafka.schema_registry import SchemaRegistryClient
 
 # Playlist fetching
 def fetch_playlist_items_page(google_api_key, youtube_playlist_id,page_token):
@@ -51,8 +55,23 @@ def summarize_video(video):
     }
 
 
+def on_delivery(err,record):
+    pass
+
 def main():
     logging.info("START")
+
+    # Format the Kafka query
+    schema_registry_client = SchemaRegistryClient(config["schema_registry"])
+    youtube_videos_value_schema = schema_registry_client.get_latest_version("youtube_videos-value")
+    kafka_config = config["kafka"] | {
+        "key.serializer": StringSerializer(),
+        "value.serializer": AvroSerializer(
+            schema_registry_client,
+            youtube_videos_value_schema.schema.schema_str
+        ),
+    }
+    producer = SerializingProducer(kafka_config)
 
     # Return all videos from our playlist
     google_api_key = config["google_api_key"]
@@ -61,8 +80,21 @@ def main():
         video_id = video_item["contentDetails"]["videoId"]
         
         video = fetch_video(google_api_key, video_id)["items"][0]
-        logging.info("GOT %s", pformat(video))
         logging.debug("GOT %s", pformat(summarize_video(video)))
+
+        producer.produce(
+            topic="youtube_videos",
+            key = video_id,
+            value = {
+                "TITLE":video["snippet"]["title"],
+                "VIEWS":int(video["statistics"].get("viewCount",0)),
+                "LIKES":int(video["statistics"].get("likeCount",0)),
+                "COMMENTS":int(video["statistics"].get("commentCount",0)),
+            },
+            on_delivery = on_delivery
+        )
+
+    producer.flush()
 
 
 if __name__ == '__main__':
