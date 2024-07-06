@@ -11,3 +11,26 @@ CREATE TABLE YOUTUBE_CHANGES WITH (CLEANUP_POLICY='compact', KAFKA_TOPIC='youtub
 FROM YOUTUBE_VIDEOS YOUTUBE_VIDEOS
 GROUP BY YOUTUBE_VIDEOS.VIDEO_ID
 EMIT CHANGES;
+
+
+INSERT INTO telegram_outbox
+SELECT
+'5617219492' AS `chat_id`,
+CONCAT(
+  'Likes changed: ',
+  CAST(likes_previous AS STRING),
+  ' to ',
+  CAST(likes_current AS STRING),
+  ' in ',
+  title
+) AS `text`
+FROM YOUTUBE_CHANGES_STREAM
+WHERE likes_current <> likes_previous;
+
+-- Stream Creation
+CREATE STREAM youtube_changes_stream WITH (KAFKA_TOPIC = 'youtube_changes', VALUE_FORMAT='avro');
+
+
+-- Check queries
+INSERT INTO telegram_outbox (`chat_id`, `text`) 
+VALUES ("$telegram's conversation id", 'Starting a Conversation by Code');
